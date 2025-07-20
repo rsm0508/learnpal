@@ -36,6 +36,20 @@ class Learner(SQLModel, table=True):
     persona_json: str = "{}"  # tone, voice, reading_level …
 
 
+class Concept(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    domain: str        # "math" | "reading"
+    label: str         # "addition within 10"
+    grade: str         # "K" | "1" | "6" etc.
+
+
+class Progress(SQLModel, table=True):
+    learner_id: int = Field(foreign_key="learner.id", primary_key=True)
+    concept_id: int = Field(foreign_key="concept.id", primary_key=True)
+    correct: int = 0
+    attempts: int = 0
+
+
 ###############################################################################
 # Helpers
 ###############################################################################

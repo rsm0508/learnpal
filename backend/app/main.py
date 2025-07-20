@@ -111,12 +111,24 @@ def list_learners(user: User = Depends(current_user)):
         learners = session.exec(stmt).all()
         return learners
 
+# ---------- Lesson ----------
+from .engine import tutor_reply   # already imported earlier
+
 @app.post("/lesson")
 def lesson(
     learner_id: int,
     user_text: str,
     user: User = Depends(current_user)
 ):
-    # ⬅ future: ownership check
+    """Route hit by the front-end. Ensures learner belongs to caller’s tenant."""
+    with Session(_engine()) as session:
+        learner = session.get(Learner, learner_id)
+        if learner is None:
+            raise HTTPException(status_code=404, detail="Learner not found")
+
+        # 🚧 tenant mismatch guard
+        if learner.tenant_id != user.tenant_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
     reply = tutor_reply(learner_id, user_text)
     return {"reply": reply}
