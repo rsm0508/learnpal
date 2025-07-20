@@ -5,5 +5,7 @@ SQLModel
 pydantic<2
 pytest
 # auth / security
- passlib[bcrypt]
- python-jose[cryptography]
+passlib[bcrypt]
+python-jose[cryptography]
+
+python-multipart
