@@ -5,7 +5,7 @@ SQLModel
 pydantic<2
 pytest
 python-multipart
-numpy>=1.26
+numpy<2
 
 # auth / security
 passlib[bcrypt]
