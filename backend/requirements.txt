@@ -2,6 +2,7 @@ fastapi[standard]
 uvicorn[standard]
 python-dotenv
 SQLModel
+pydantic<2
 pytest
 # auth / security
  passlib[bcrypt]
