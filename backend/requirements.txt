@@ -4,8 +4,16 @@ python-dotenv
 SQLModel
 pydantic<2
 pytest
+python-multipart
+
 # auth / security
 passlib[bcrypt]
 python-jose[cryptography]
 
-python-multipart
+# voice I/O
+openai-whisper==20231106  # tiny model OK for MVP
+SoundFile                  # whisper dependency
+edge-tts==7.0.2            # simple TTS wrapper
+websockets>=11.0           # FastAPI WS
+
+openai>=1.23.0

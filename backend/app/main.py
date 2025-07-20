@@ -6,8 +6,21 @@ from .models import init_db, Tenant, User, Learner, _engine
 from .auth import hash_pw, verify_pw, create_token, current_user
 from .schemas import UserCreate, TokenOut, LearnerCreate
 
+from .voice import router as voice_router
+from fastapi.middleware.cors import CORSMiddleware
+
+from .engine import tutor_reply
+
 app = FastAPI(title="LearnPal API")
 
+app.include_router(voice_router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # dev front-end
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ------------------------------------------------------------------
 # Health check
@@ -97,3 +110,13 @@ def list_learners(user: User = Depends(current_user)):
         stmt = select(Learner).where(Learner.tenant_id == user.tenant_id)
         learners = session.exec(stmt).all()
         return learners
+
+@app.post("/lesson")
+def lesson(
+    learner_id: int,
+    user_text: str,
+    user: User = Depends(current_user)
+):
+    # ⬅ future: ownership check
+    reply = tutor_reply(learner_id, user_text)
+    return {"reply": reply}
