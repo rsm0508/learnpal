@@ -18,7 +18,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          learner_id: 1,         // ⬅ later we’ll pass the real learner ID
+          learner_id: 1, // ⬅ will be dynamic after auth UI lands
           user_text: text,
         }),
       });
@@ -58,7 +58,7 @@ export default function App() {
         {transcript && <em> “{transcript}”</em>}
       </p>
 
-      {/* GPT reply */}
+      {/* GPT reply + audio */}
       {replyUrl && (
         <>
           <audio key={replyUrl} src={replyUrl} controls autoPlay />
