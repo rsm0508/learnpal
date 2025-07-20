@@ -3,3 +3,6 @@ uvicorn[standard]
 python-dotenv
 SQLModel
 pytest
+# auth / security
+ passlib[bcrypt]
+ python-jose[cryptography]
