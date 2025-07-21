@@ -6,8 +6,9 @@ engine.py – minimal tutoring engine for MVP.
 """
 
 import os
+from dotenv import load_dotenv
+load_dotenv(override=True)
 from sqlmodel import Session, select
-
 from .models import _engine, Learner, Concept, Progress
 
 OPENAI_MODEL = "gpt-4o-mini"  # inexpensive and capable
@@ -60,6 +61,7 @@ def _gpt_reply(messages: list[dict[str, str]]) -> str:
 
     from openai import OpenAI  # local import so module loads without key
     client = OpenAI(api_key=api_key)
+    print("DEBUG-KEY-START", api_key[:12], "...", api_key[-6:], "DEBUG-KEY-END")
 
     resp = client.chat.completions.create(
         model=OPENAI_MODEL,
