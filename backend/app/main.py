@@ -4,7 +4,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from .models import init_db, Tenant, User, Learner, _engine
+from .models import (
+    init_db,
+    Tenant,
+    User,
+    Learner,
+    Concept,     # ← added
+    Progress,    # ← added
+    _engine,
+)
 from .auth import hash_pw, verify_pw, create_token, current_user
 from .schemas import UserCreate, TokenOut, LearnerCreate
 from .voice import router as voice_router
@@ -94,6 +102,24 @@ def list_learners(user: User = Depends(current_user)):
     with Session(_engine()) as session:
         stmt = select(Learner).where(Learner.tenant_id == user.tenant_id)
         return session.exec(stmt).all()
+
+@app.get("/me")
+def who_am_i(user: User = Depends(current_user)):
+    return {"email": user.email, "tenant_id": user.tenant_id}
+
+
+@app.get("/progress/{learner_id}")
+def learner_progress(learner_id: int, user: User = Depends(current_user)):
+    with Session(_engine()) as s:
+        learner = s.get(Learner, learner_id)
+        if not learner or learner.tenant_id != user.tenant_id:
+            raise HTTPException(403, "Forbidden")
+        stmt = (
+            select(Concept.label, Progress.correct, Progress.attempts)
+            .join(Progress, Concept.id == Progress.concept_id)
+            .where(Progress.learner_id == learner_id)
+        )
+        return {row.label: {"correct": row.correct, "attempts": row.attempts} for row in s.exec(stmt)}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
