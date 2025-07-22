@@ -2,10 +2,12 @@ import { useState } from "react";
 import api, { setToken } from "../api";
 
 
-export default function Login({ onLogin, onSwitchToSignup }) {
+export default function Signup({ onSignup, onSwitchToLogin }) {
   const [formData, setFormData] = useState({
     email: "",
-    password: ""
+    password: "",
+    confirmPassword: "",
+    tenantName: ""
   });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -19,13 +21,40 @@ export default function Login({ onLogin, onSwitchToSignup }) {
     }
   };
 
+  const validateForm = () => {
+    const newErrors = {};
+    
+    if (!formData.email) {
+      newErrors.email = "Email is required";
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      newErrors.email = "Please enter a valid email";
+    }
+    
+    if (!formData.password) {
+      newErrors.password = "Password is required";
+    } else if (formData.password.length < 6) {
+      newErrors.password = "Password must be at least 6 characters";
+    }
+    
+    if (!formData.confirmPassword) {
+      newErrors.confirmPassword = "Please confirm your password";
+    } else if (formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = "Passwords do not match";
+    }
+    
+    if (!formData.tenantName) {
+      newErrors.tenantName = "Organization name is required";
+    }
+    
+    return newErrors;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!formData.email || !formData.password) {
-      setErrors({
-        submit: "Please enter both email and password"
-      });
+    const newErrors = validateForm();
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
       return;
     }
 
@@ -33,16 +62,18 @@ export default function Login({ onLogin, onSwitchToSignup }) {
     setErrors({});
 
     try {
-      const { data } = await api.post("/auth/token", new URLSearchParams({
-        username: formData.email,
+      const { data } = await api.post("/auth/signup", {
+        email: formData.email,
         password: formData.password,
-      }));
+        tenant_name: formData.tenantName
+      });
+      
       setToken(data.access_token);
-      onLogin();
+      onSignup();
     } catch (error) {
-      console.error("Login error:", error);
+      console.error("Signup error:", error);
       setErrors({
-        submit: error.response?.data?.detail || "Invalid email or password"
+        submit: error.response?.data?.detail || "Failed to create account. Please try again."
       });
     } finally {
       setLoading(false);
@@ -54,8 +85,8 @@ export default function Login({ onLogin, onSwitchToSignup }) {
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold text-blue-600 mb-2">LearnPal</h1>
-          <h2 className="text-lg font-semibold">Welcome back</h2>
-          <p className="text-sm text-gray-600">Sign in to your account</p>
+          <h2 className="text-lg font-semibold">Create your account</h2>
+          <p className="text-sm text-gray-600">Start your child's learning journey</p>
         </div>
 
         <div className="card">
@@ -69,7 +100,7 @@ export default function Login({ onLogin, onSwitchToSignup }) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Email address
+                  Email address *
                 </label>
                 <input
                   name="email"
@@ -87,7 +118,25 @@ export default function Login({ onLogin, onSwitchToSignup }) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Password
+                  Organization name *
+                </label>
+                <input
+                  name="tenantName"
+                  value={formData.tenantName}
+                  onChange={handleChange}
+                  className={`input ${errors.tenantName ? 'input-error' : ''}`}
+                  placeholder="Smith Family"
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">Your family name, school, or organization</p>
+                {errors.tenantName && (
+                  <p className="text-sm text-red-600 mt-1">{errors.tenantName}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Password *
                 </label>
                 <input
                   name="password"
@@ -103,25 +152,43 @@ export default function Login({ onLogin, onSwitchToSignup }) {
                 )}
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Confirm password *
+                </label>
+                <input
+                  name="confirmPassword"
+                  type="password"
+                  value={formData.confirmPassword}
+                  onChange={handleChange}
+                  className={`input ${errors.confirmPassword ? 'input-error' : ''}`}
+                  placeholder="••••••••"
+                  required
+                />
+                {errors.confirmPassword && (
+                  <p className="text-sm text-red-600 mt-1">{errors.confirmPassword}</p>
+                )}
+              </div>
+
               <button
                 type="submit"
                 disabled={loading}
                 className="btn-primary w-full"
               >
-                {loading ? "Signing in..." : "Sign In"}
+                {loading ? "Creating account..." : "Create Account"}
               </button>
             </form>
           </div>
           
           <div className="card-body border-t border-gray-200 bg-gray-50">
             <p className="text-center text-sm text-gray-600">
-              Don't have an account?{" "}
+              Already have an account?{" "}
               <button
                 type="button"
-                onClick={onSwitchToSignup}
+                onClick={onSwitchToLogin}
                 className="font-medium text-blue-600 hover:text-blue-500 focus:outline-none focus:underline"
               >
-                Sign up
+                Sign in
               </button>
             </p>
           </div>

@@ -1,36 +1,34 @@
 """
-engine.py – minimal tutoring engine for MVP.
-• Builds a persona-based system prompt
-• Calls GPT-4o-mini *only if* OPENAI_API_KEY is present
-• Records simple progress (#attempts / #correct) for one starter concept
+engine.py – adaptive tutor with hint tiers, latency tracking, memory cap,
+and starter-concept seeding (required by main.py).
+
+Key components
+──────────────
+• seed_concepts(): populates Concept table at app start
+• _gpt_reply() returns (text, latency_ms) with robust logging
+• _tier_update() manages wrong-streak with bounded OrderedDict
 """
 
+import logging
 import os
+import re
+import time
+from collections import OrderedDict
+from typing import Tuple
+
 from dotenv import load_dotenv
-load_dotenv(override=True)
 from sqlmodel import Session, select
-from .models import _engine, Learner, Concept, Progress
 
-OPENAI_MODEL = "gpt-4o-mini"  # inexpensive and capable
+from .models import _engine, Concept, Learner, Progress
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Prompt helpers
-# ──────────────────────────────────────────────────────────────────────────────
-def build_system_prompt(learner: Learner) -> str:
-    if int(learner.dob[:4]) >= 2018:  # ~7 yrs old
-        return (
-            "You are a friendly kindergarten math tutor. "
-            "Use very short sentences and emojis."
-        )
-    return (
-        "You are a supportive 6th-grade tutor. "
-        "Encourage analytical thinking and ask follow-up questions."
-    )
+load_dotenv(override=True)
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
+OPENAI_MODEL = "gpt-4o-mini"
+MAX_STREAK_ENTRIES = int(os.getenv("MAX_STREAK_ENTRIES", "1000"))
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Starter concepts seeding
-# ──────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────── starter concepts & seed fn
 STARTER_CONCEPTS = [
     ("math", "addition within 10", "K"),
     ("math", "counting by 5s", "K"),
@@ -38,66 +36,117 @@ STARTER_CONCEPTS = [
 ]
 
 
-def seed_concepts():
+def seed_concepts() -> None:
+    """Populate Concept table once (main.py imports this)."""
     with Session(_engine()) as s:
         if s.exec(select(Concept)).first():
             return
-        for domain, label, grade in STARTER_CONCEPTS:
-            s.add(Concept(domain=domain, label=label, grade=grade))
+        for dom, label, grade in STARTER_CONCEPTS:
+            s.add(Concept(domain=dom, label=label, grade=grade))
         s.commit()
+        log.info("Seeded starter concepts")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Tutor main entry
-# ──────────────────────────────────────────────────────────────────────────────
-def _gpt_reply(messages: list[dict[str, str]]) -> str:
-    """
-    Return GPT reply *or* a stub if OPENAI_API_KEY is missing (CI safety).
-    """
+# ────────────────────────────── GPT wrapper
+def _gpt_reply(messages) -> Tuple[str, int]:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        # CI / offline fallback
-        return "OK, let's keep going!"
+        return "OK, let's keep going!", 0
+    try:
+        from openai import OpenAI
 
-    from openai import OpenAI  # local import so module loads without key
-    client = OpenAI(api_key=api_key)
-    print("DEBUG-KEY-START", api_key[:12], "...", api_key[-6:], "DEBUG-KEY-END")
+        client = OpenAI(api_key=api_key, timeout=10)
+        t0 = time.monotonic()
+        resp = client.chat.completions.create(
+            model=OPENAI_MODEL, messages=messages, max_tokens=150
+        )
+        latency = int((time.monotonic() - t0) * 1000)
+        return resp.choices[0].message.content.strip(), latency
+    except Exception as exc:  # noqa: BLE001
+        log.error("GPT API error: %s", exc)
+        return "I'm having trouble responding right now.", 0
 
-    resp = client.chat.completions.create(
-        model=OPENAI_MODEL,
-        messages=messages,
-        max_tokens=150,
+
+# ────────────────────────────── helpers
+_WRONG_STREAK: "OrderedDict[Tuple[int, int], int]" = OrderedDict()
+HINT_THRESHOLD = 2
+ANSWER_THRESHOLD = 3
+_ADD_RE = re.compile(r"\b(\d+)\s*\+\s*(\d+)\b")
+
+
+def _system_prompt(learner: Learner, tier: str) -> str:
+    base = (
+        "You are a friendly kindergarten math tutor. Use very short sentences and emojis."
+        if int(learner.dob[:4]) >= 2018
+        else "You are a supportive 6th-grade tutor. Encourage analytical thinking."
     )
-    return resp.choices[0].message.content.strip()
+    return {
+        "normal": base,
+        "hint": f"{base} Provide **one** helpful hint only. DO NOT reveal the answer.",
+        "answer": f"{base} State the correct answer as simply as possible.",
+    }[tier]
 
 
-def tutor_reply(learner_id: int, user_text: str) -> str:
-    """Return tutor reply and update simple progress."""
-    with Session(_engine()) as session:
-        learner = session.get(Learner, learner_id)
+def _is_correct(text: str) -> bool:
+    text = text.strip()
+    if text.isdigit():
+        return 0 <= int(text) <= 10
+    if m := _ADD_RE.search(text):
+        a, b = map(int, m.groups())
+        return (a + b) <= 10
+    return False
+
+
+def _tier_update(key: Tuple[int, int], correct: bool) -> str:
+    if correct:
+        _WRONG_STREAK.pop(key, None)
+        return "normal"
+    _WRONG_STREAK[key] = _WRONG_STREAK.get(key, 0) + 1
+    if _WRONG_STREAK[key] == HINT_THRESHOLD:
+        tier = "hint"
+    elif _WRONG_STREAK[key] >= ANSWER_THRESHOLD:
+        tier = "answer"
+        _WRONG_STREAK.pop(key, None)
+    else:
+        tier = "normal"
+
+    if len(_WRONG_STREAK) > MAX_STREAK_ENTRIES:
+        _WRONG_STREAK.popitem(last=False)
+    return tier
+
+
+# ────────────────────────────── public entry
+def tutor_reply(learner_id: int, user_text: str):
+    with Session(_engine()) as s:
+        learner = s.get(Learner, learner_id)
         if not learner:
-            return "Learner not found."
+            return {"type": "error", "content": "Learner not found.", "latency_ms": 0}
 
-        # GPT (or stub) reply
-        messages = [
-            {"role": "system", "content": build_system_prompt(learner)},
-            {"role": "user", "content": user_text},
-        ]
-        reply = _gpt_reply(messages)
-
-        # Progress write-back (very naive)
-        concept = session.exec(
+        concept = s.exec(
             select(Concept).where(Concept.label == "addition within 10")
         ).first()
-        if concept:
-            prog_pk = (learner.id, concept.id)
-            prog = session.get(Progress, prog_pk)
-            if not prog:
-                prog = Progress(learner_id=learner.id, concept_id=concept.id)
-            prog.attempts += 1
-            if "+" in user_text:
-                prog.correct += 1
-            session.add(prog)
-            session.commit()
+        if concept is None:  # auto-seed for test DBs
+            concept = Concept(domain="math", label="addition within 10", grade="K")
+            s.add(concept)
+            s.commit()
+            s.refresh(concept)
 
-        return reply
+        correct = _is_correct(user_text)
+        pk = (learner.id, concept.id)
+        prog = s.get(Progress, pk) or Progress(
+            learner_id=learner.id, concept_id=concept.id
+        )
+        prog.attempts += 1
+        if correct:
+            prog.correct += 1
+        s.add(prog)
+
+        tier = _tier_update(pk, correct)
+        reply_text, latency = _gpt_reply(
+            [
+                {"role": "system", "content": _system_prompt(learner, tier)},
+                {"role": "user", "content": user_text},
+            ]
+        )
+        s.commit()
+        return {"type": tier, "content": reply_text, "latency_ms": latency}
